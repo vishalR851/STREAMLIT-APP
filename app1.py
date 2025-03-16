@@ -7,21 +7,6 @@ Original file is located at
     https://colab.research.google.com/drive/1pT4C9TfUpVHd3oRadn2OCE1epgaHUYVO
 """
 
-import streamlit as st
-import pandas as pd
-import numpy as np
-
-import seaborn as sns
-import plotly.express as px
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler, OneHotEncoder, LabelEncoder
-from sklearn.impute import SimpleImputer
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.linear_model import LogisticRegression, LinearRegression
-from sklearn.svm import SVC, SVR
-from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
-from sklearn.naive_bayes import GaussianNB
-from sklearn.metrics import accuracy_score, classification_report, mean_squared_error, r2_score
 
 st.title("Automated Data Analysis & ML Pipeline")
 
