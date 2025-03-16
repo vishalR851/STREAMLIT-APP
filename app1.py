@@ -7,12 +7,6 @@ Original file is located at
     https://colab.research.google.com/drive/1pT4C9TfUpVHd3oRadn2OCE1epgaHUYVO
 """
 
-!pip install streamlit
-
-!pip install pyngrok
-
-!pip install streamlit pyngrok pandas numpy matplotlib seaborn plotly scikit-learn
-
 import streamlit as st
 import pandas as pd
 import numpy as np
