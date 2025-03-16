@@ -153,33 +153,3 @@ if uploaded_file:
     ax.set_title("Predictions vs Actual Values")
     st.pyplot(fig)
 
-!streamlit run app.py &>/dev/null &
-
-import logging
-import os
-import signal # Import the signal module
-from pyngrok import ngrok
-# Disable pyngrok warnings
-logging.getLogger("pyngrok").setLevel(logging.ERROR)
-
-!ngrok authtoken 2u72IeZvUkS7VVpI32hd0zOWZH4_6CbaRrLLKayoy8dtQFZVs  # ✅ Set your token
-
-# Kill any existing streamlit process
-try:
-    pid = int(os.popen("pgrep -f 'streamlit run app.py'").read())
-    os.kill(pid, signal.SIGTERM) # Now signal is defined and can be used
-except ValueError:
-    pass
-
-# Disconnect all existing tunnels
-for tunnel in ngrok.get_tunnels():
-    ngrok.disconnect(tunnel.public_url)
-
-# Connect and get the public URL
-public_url = ngrok.connect(8501).public_url
-print(f"🚀 Public URL: {public_url}")
-
-with open("requirements.txt", "w") as f:
-    f.write("streamlit\npandas\nnumpy\nscikit-learn\nplotly")
-from google.colab import files
-files.download("requirements.txt")
