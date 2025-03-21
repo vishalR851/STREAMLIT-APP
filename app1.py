@@ -10,139 +10,160 @@ Original file is located at
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
 import plotly.express as px
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler, OneHotEncoder, LabelEncoder
+import shap
+import pickle
+import sqlite3
+
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.linear_model import LogisticRegression, LinearRegression
-from sklearn.svm import SVC, SVR
+from sklearn.linear_model import LogisticRegression
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
-from sklearn.naive_bayes import GaussianNB
+from sklearn.svm import SVC, SVR
 from sklearn.metrics import accuracy_score, classification_report, mean_squared_error, r2_score
-st.title("Automated Data Analysis & ML Pipeline")
 
-# 1. Data Upload
-st.header("1. Upload Your Dataset")
-uploaded_file = st.file_uploader("Upload CSV or Excel file", type=["csv", "xlsx"])
-if uploaded_file:
-    df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
-    st.write("### 📌 Preview of the Uploaded Data:")
-    st.dataframe(df.head())
+# Set up Streamlit Tabs
+st.set_page_config(page_title="AI-Assisted AutoML Tool", layout="wide")
+tab1, tab2, tab3, tab4 = st.tabs(["📊 Data Upload & EDA", "🤖 Model Training", "📈 Explainability", "🔮 Real-Time Prediction"])
 
-    # 2. Data Cleaning & Preprocessing
-    st.header("2. Data Cleaning & Preprocessing")
-    if st.checkbox("Remove Duplicates"):
-        df.drop_duplicates(inplace=True)
-        st.write("✅ Duplicates removed!")
+# ------------------- TAB 1: Data Upload & EDA -------------------
+with tab1:
+    st.title("📊 Upload and Explore Your Data")
+    uploaded_file = st.file_uploader("Upload CSV, Excel, or Fetch from Database", type=["csv", "xlsx"])
+    
+    if uploaded_file:
+        df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
+        st.write("### 🔍 Preview of the Uploaded Data:")
+        st.dataframe(df.head())
 
-    missing_values = df.isnull().sum()
-    st.write("### 🔍 Missing Values in Each Column:")
-    st.write(missing_values[missing_values > 0])
+        # Handling Missing Values
+        missing_values = df.isnull().sum()
+        st.write("### ❗ Missing Values in Each Column:")
+        st.write(missing_values[missing_values > 0])
 
-    handle_missing = st.selectbox("How to handle missing values?", ["Mean Imputation", "Median Imputation", "Drop Rows", "Do Nothing"])
-    if handle_missing == "Mean Imputation":
-        df.fillna(df.mean(), inplace=True)
-    elif handle_missing == "Median Imputation":
-        df.fillna(df.median(), inplace=True)
-    elif handle_missing == "Drop Rows":
-        df.dropna(inplace=True)
+        handle_missing = st.selectbox("How to handle missing values?", ["Mean Imputation", "Median Imputation", "Most Frequent", "Drop Rows", "Do Nothing"])
+        if handle_missing == "Mean Imputation":
+            imputer = SimpleImputer(strategy="mean")
+        elif handle_missing == "Median Imputation":
+            imputer = SimpleImputer(strategy="median")
+        elif handle_missing == "Most Frequent":
+            imputer = SimpleImputer(strategy="most_frequent")
+        elif handle_missing == "Drop Rows":
+            df.dropna(inplace=True)
+        else:
+            imputer = None
+        
+        if imputer:
+            df[df.select_dtypes(include=np.number).columns] = imputer.fit_transform(df.select_dtypes(include=np.number))
 
-    st.write("✅ Missing values handled!")
+        st.write("### ✅ Data after Handling Missing Values:")
+        st.dataframe(df.head())
 
-    # Outlier Detection
-    if st.checkbox("Remove Outliers (Z-score > 3)"):
-        numeric_cols = df.select_dtypes(include=[np.number]).columns
-        df = df[(np.abs(df[numeric_cols] - df[numeric_cols].mean()) / df[numeric_cols].std()) < 3].dropna()
-        st.write("✅ Outliers removed!")
-
-    # Data Type Conversion
-    st.write("### Convert Data Types")
-    for col in df.columns:
-        if df[col].dtype == object:
-            convert = st.radio(f"Convert column {col} to: ", ["Leave as is", "Convert to category", "Label Encode"], key=col)
-            if convert == "Convert to category":
-                df[col] = df[col].astype("category")
-            elif convert == "Label Encode":
-                df[col] = LabelEncoder().fit_transform(df[col])
-
-    # Feature Scaling
-    if st.checkbox("Apply Standard Scaling"):
-        scaler = StandardScaler()
-        df[df.select_dtypes(include=[np.number]).columns] = scaler.fit_transform(df.select_dtypes(include=[np.number]))
-        st.write("✅ Standard Scaling Applied!")
-
-    st.write("### ✅ Data after Cleaning:")
-    st.dataframe(df.head())
-
-    # 3. Exploratory Data Analysis (EDA)
-    st.header("3. Exploratory Data Analysis (EDA)")
-    selected_column = st.selectbox("Select a Column for Visualization", df.columns)
-    plot_type = st.selectbox("Choose Plot Type", ["Histogram", "Scatter", "Box Plot", "Correlation Matrix"])
-
-    if plot_type == "Histogram":
+        # Basic EDA Visualization
+        selected_column = st.selectbox("Select a Column for Visualization", df.columns)
         fig = px.histogram(df, x=selected_column)
-    elif plot_type == "Scatter":
-        fig = px.scatter(df, x=df.columns[0], y=selected_column)
-    elif plot_type == "Box Plot":
-        fig = px.box(df, y=selected_column)
-    elif plot_type == "Correlation Matrix":
-        fig, ax = plt.subplots()
-        sns.heatmap(df.corr(), annot=True, cmap="coolwarm", ax=ax)
-        st.pyplot(fig)
+        st.plotly_chart(fig)
 
-    st.plotly_chart(fig)
+# ------------------- TAB 2: Model Training -------------------
+with tab2:
+    st.title("🤖 Train a Machine Learning Model")
+    
+    if uploaded_file:
+        target = st.selectbox("Select the Target Variable", df.columns)
+        features = [col for col in df.columns if col != target]
 
-    # 4. Machine Learning Model Selection & Training
-    st.header("4. Model Selection & Training")
-    target = st.selectbox("Select the Target Variable", df.columns)
-    features = st.multiselect("Select Feature Columns", [col for col in df.columns if col != target])
+        # Preprocess Data
+        X = df[features]
+        y = df[target]
 
-    X = df[features]
-    y = df[target]
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        # Separate categorical and numerical features
+        num_features = X.select_dtypes(include=np.number).columns.tolist()
+        cat_features = X.select_dtypes(exclude=np.number).columns.tolist()
 
-    # Model Suggestion
-    model_type = "Classification" if df[target].dtype == object or len(df[target].unique()) < 10 else "Regression"
-    st.write(f"Suggested Task Type: {model_type}")
+        # Preprocessing Pipelines
+        num_pipeline = Pipeline([
+            ('imputer', SimpleImputer(strategy="mean")),
+            ('scaler', StandardScaler())
+        ])
+        cat_pipeline = Pipeline([
+            ('encoder', OneHotEncoder(handle_unknown='ignore'))
+        ])
+        preprocessor = ColumnTransformer([
+            ('num', num_pipeline, num_features),
+            ('cat', cat_pipeline, cat_features)
+        ])
+        
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-    model_options = {"Classification": ["Random Forest", "Logistic Regression", "SVM", "Decision Tree", "Naive Bayes"],
-                     "Regression": ["Random Forest", "Linear Regression", "SVM", "Decision Tree"]}
+        # Model Selection
+        model_type = st.radio("Select Task Type", ["Classification", "Regression"])
+        model_options = {
+            "Random Forest": RandomForestClassifier() if model_type == "Classification" else RandomForestRegressor(),
+            "Decision Tree": DecisionTreeClassifier() if model_type == "Classification" else DecisionTreeRegressor(),
+            "SVM": SVC() if model_type == "Classification" else SVR(),
+            "Logistic Regression": LogisticRegression() if model_type == "Classification" else None
+        }
+        
+        selected_model_name = st.selectbox("Choose a Model", list(model_options.keys()))
+        selected_model = model_options[selected_model_name]
 
-    model_choice = st.selectbox("Select a Model", model_options[model_type])
+        # Hyperparameter Tuning
+        if selected_model:
+            param_grid = {
+                "Random Forest": {"n_estimators": [50, 100, 200], "max_depth": [None, 10, 20]},
+                "Decision Tree": {"max_depth": [None, 10, 20]},
+                "SVM": {"C": [0.1, 1, 10]},
+                "Logistic Regression": {"C": [0.1, 1, 10]}
+            }
+            grid = GridSearchCV(selected_model, param_grid[selected_model_name], cv=5)
+            pipeline = Pipeline([('preprocessor', preprocessor), ('model', grid)])
 
-    model = None
-    if model_choice == "Random Forest":
-        model = RandomForestClassifier() if model_type == "Classification" else RandomForestRegressor()
-    elif model_choice == "Logistic Regression":
-        model = LogisticRegression()
-    elif model_choice == "SVM":
-        model = SVC() if model_type == "Classification" else SVR()
-    elif model_choice == "Decision Tree":
-        model = DecisionTreeClassifier() if model_type == "Classification" else DecisionTreeRegressor()
-    elif model_choice == "Naive Bayes":
-        model = GaussianNB()
+            pipeline.fit(X_train, y_train)
+            y_pred = pipeline.predict(X_test)
 
-    model.fit(X_train, y_train)
-    y_pred = model.predict(X_test)
+            st.write("### ✅ Model Performance:")
+            if model_type == "Classification":
+                acc = accuracy_score(y_test, y_pred)
+                st.write(f"📊 Accuracy: {acc:.2f}")
+                st.text(classification_report(y_test, y_pred))
+            else:
+                mse = mean_squared_error(y_test, y_pred)
+                r2 = r2_score(y_test, y_pred)
+                st.write(f"📉 Mean Squared Error: {mse:.2f}")
+                st.write(f"📊 R-Squared: {r2:.2f}")
 
-    # Model Evaluation
-    st.header("5. Model Evaluation")
-    if model_type == "Classification":
-        st.write(f"Accuracy: {accuracy_score(y_test, y_pred):.2f}")
-        st.text(classification_report(y_test, y_pred))
-    else:
-        st.write(f"Mean Squared Error: {mean_squared_error(y_test, y_pred):.2f}")
-        st.write(f"R-Squared: {r2_score(y_test, y_pred):.2f}")
+            # Save Model
+            with open("trained_model.pkl", "wb") as f:
+                pickle.dump(pipeline, f)
+            st.success("🎉 Model trained and saved!")
 
-    # Predictions vs Actual Values
-    st.header("6. Predictions vs Actual Values")
-    fig, ax = plt.subplots()
-    ax.scatter(y_test, y_pred, alpha=0.5)
-    ax.set_xlabel("Actual Values")
-    ax.set_ylabel("Predicted Values")
-    ax.set_title("Predictions vs Actual Values")
-    st.pyplot(fig)
+# ------------------- TAB 3: Model Explainability -------------------
+with tab3:
+    st.title("📈 Model Explainability with SHAP")
+    if uploaded_file:
+        explainer = shap.Explainer(pipeline.named_steps['model'])
+        shap_values = explainer(X_test)
+        st.write("### Feature Importance:")
+        st.pyplot(shap.plots.waterfall(shap_values[0]))
+
+# ------------------- TAB 4: Real-Time Prediction -------------------
+with tab4:
+    st.title("🔮 Real-Time Predictions")
+    if uploaded_file:
+        user_input = {}
+        for col in features:
+            user_input[col] = st.number_input(f"Enter {col}:", value=float(X[col].mean()))
+        user_df = pd.DataFrame([user_input])
+        
+        with open("trained_model.pkl", "rb") as f:
+            model = pickle.load(f)
+        
+        prediction = model.predict(user_df)
+        st.write(f"### 🎯 Predicted Value: {prediction[0]}")
+
+
 
